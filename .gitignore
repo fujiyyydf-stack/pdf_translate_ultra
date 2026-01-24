@@ -1,0 +1,46 @@
+# 环境变量（包含 API 密钥）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# 上传的 PDF 文件（用户上传的临时文件）
+uploads/*
+!uploads/.gitkeep
+
+# 翻译输出文件（包含翻译结果）
+output/*
+!output/.gitkeep
+
+# 用户的 PDF 文件
+*.pdf
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 临时文件
+*.tmp
+*.temp
+*.log

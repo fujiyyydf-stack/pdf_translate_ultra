@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Translator</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Noto+Serif+SC:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- PDF.js for rendering PDF pages -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body data-theme="dark">
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+                    </svg>
+                </div>
+                <span class="logo-text">Translator</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-view="translate">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802"/>
+                    </svg>
+                    <span>翻译</span>
+                </a>
+                <a href="#" class="nav-item" data-view="compare">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
+                    </svg>
+                    <span>对比阅读</span>
+                </a>
+                <a href="#" class="nav-item" data-view="history">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>历史</span>
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="theme-switcher">
+                    <button class="theme-btn" data-theme="dark" title="深夜">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+                    </button>
+                    <button class="theme-btn" data-theme="blue" title="海洋">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                    </button>
+                    <button class="theme-btn" data-theme="light" title="日光">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/></svg>
+                    </button>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 翻译视图 -->
+            <div class="view-panel" id="translateView">
+                <header class="header">
+                    <div class="header-left">
+                        <h1 class="page-title">法语文献翻译</h1>
+                        <p class="page-subtitle">学术级 PDF 翻译工具</p>
+                    </div>
+                    <div class="mode-switcher">
+                        <button class="mode-btn active" data-mode="flash">
+                            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                            Flash
+                        </button>
+                        <button class="mode-btn" data-mode="high">
+                            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+                            </svg>
+                            High Quality
+                        </button>
+                    </div>
+                </header>
+                
+                <div class="content-wrapper">
+                    <!-- 上传区域 -->
+                    <div class="upload-section" id="uploadSection">
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                                    <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                                </svg>
+                            </div>
+                            <h3 class="upload-title">拖放 PDF 文件</h3>
+                            <p class="upload-subtitle">支持法语学术文献、哲学著作</p>
+                            <input type="file" id="fileInput" accept=".pdf" hidden>
+                            <button class="upload-btn" id="selectFileBtn">选择文件</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 配置面板 -->
+                    <div class="config-panel" id="configPanel" style="display: none;">
+                        <div class="file-info">
+                            <div class="file-icon">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625z"/>
+                                </svg>
+                            </div>
+                            <div class="file-details">
+                                <span class="file-name" id="fileName">document.pdf</span>
+                                <span class="file-meta">
+                                    <span id="fileSize">2.4 MB</span>
+                                    <span class="separator">·</span>
+                                    <span id="totalPages">-- 页</span>
+                                </span>
+                            </div>
+                            <button class="remove-file" id="removeFile">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        
+                        <!-- 翻译页数选择 - 更突出 -->
+                        <div class="page-range-section">
+                            <div class="section-header">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                                </svg>
+                                <span>选择翻译页数</span>
+                            </div>
+                            <div class="page-range-controls">
+                                <div class="page-input-group">
+                                    <label>起始页</label>
+                                    <input type="number" id="startPage" placeholder="1" min="1" value="1">
+                                </div>
+                                <div class="page-range-arrow">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/>
+                                    </svg>
+                                </div>
+                                <div class="page-input-group">
+                                    <label>结束页</label>
+                                    <input type="number" id="endPage" placeholder="10" min="1" value="10">
+                                </div>
+                                <div class="page-count-badge" id="rangeInfo">
+                                    共 10 页
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="config-grid">
+                            <!-- Flash 模式配置 -->
+                            <div class="config-item flash-config" id="flashConfig">
+                                <label>翻译模型</label>
+                                <select id="modelSelect">
+                                    <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
+                                    <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+                                    <option value="openai/gpt-4.1">GPT-4.1</option>
+                                    <option value="deepseek/deepseek-chat">DeepSeek Chat</option>
+                                </select>
+                            </div>
+                            
+                            <div class="config-item">
+                                <label>并发数</label>
+                                <input type="number" id="workers" value="10" min="1" max="20">
+                            </div>
+                            
+                            <!-- 提示词编辑区域 -->
+                            <div class="config-item prompt-section">
+                                <div class="prompt-header">
+                                    <label>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                                            <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
+                                        </svg>
+                                        翻译提示词
+                                    </label>
+                                    <button type="button" class="prompt-toggle" id="promptToggle">
+                                        <span class="toggle-text">展开编辑</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                            <path d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="prompt-preview" id="promptPreview">
+                                    <span class="preview-text">专业法语翻译，保持学术性和文学性...</span>
+                                </div>
+                                <div class="prompt-editor" id="promptEditor" style="display: none;">
+                                    <textarea id="systemPrompt" rows="8" placeholder="输入系统提示词..."></textarea>
+                                    <div class="prompt-actions">
+                                        <button type="button" class="prompt-btn reset" id="resetPrompt">恢复默认</button>
+                                        <button type="button" class="prompt-btn save" id="savePrompt">保存</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- High Quality 模式配置 -->
+                            <div class="config-item multi-model-section" id="multiModelConfig" style="display: none;">
+                                <label>多模型翻译配置</label>
+                                <p class="config-hint">选择多个翻译模型，结果将由整合模型综合</p>
+                                
+                                <div class="multi-model-list" id="multiModelList">
+                                    <!-- 动态生成的模型选择器 -->
+                                </div>
+                                
+                                <button type="button" class="add-model-btn" id="addModelBtn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 4.5v15m7.5-7.5h-15"/>
+                                    </svg>
+                                    添加翻译模型
+                                </button>
+                                
+                                <div class="integration-model-section">
+                                    <label>整合模型</label>
+                                    <p class="config-hint">负责综合多个翻译结果</p>
+                                    <select id="integrationModel" class="model-select integration">
+                                        <!-- 动态加载 -->
+                                    </select>
+                                </div>
+                                
+                                <!-- 多模型整合提示词 -->
+                                <div class="prompt-header" style="margin-top: 16px;">
+                                    <label>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                                            <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
+                                        </svg>
+                                        整合提示词
+                                    </label>
+                                    <button type="button" class="prompt-toggle" id="integrationPromptToggle">
+                                        <span class="toggle-text">展开编辑</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                            <path d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="prompt-preview" id="integrationPromptPreview">
+                                    <span class="preview-text">整合多个翻译版本，取长补短...</span>
+                                </div>
+                                <div class="prompt-editor" id="integrationPromptEditor" style="display: none;">
+                                    <textarea id="integrationPrompt" rows="8" placeholder="输入整合提示词..."></textarea>
+                                    <div class="prompt-actions">
+                                        <button type="button" class="prompt-btn reset" id="resetIntegrationPrompt">恢复默认</button>
+                                        <button type="button" class="prompt-btn save" id="saveIntegrationPrompt">保存</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button class="start-btn" id="startBtn">
+                            <span class="btn-text">开始翻译</span>
+                            <span class="btn-icon">
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                                    <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </div>
+                    
+                    <!-- 进度面板 -->
+                    <div class="progress-panel" id="progressPanel" style="display: none;">
+                        <div class="progress-ring-container">
+                            <svg class="progress-ring" viewBox="0 0 120 120">
+                                <circle class="progress-ring-bg" cx="60" cy="60" r="54"/>
+                                <circle class="progress-ring-fill" cx="60" cy="60" r="54" id="progressRing"/>
+                            </svg>
+                            <div class="progress-ring-text">
+                                <span class="progress-percent" id="progressPercent">0</span>
+                                <span class="progress-label">%</span>
+                            </div>
+                        </div>
+                        
+                        <div class="progress-info">
+                            <h3 class="progress-title">正在翻译</h3>
+                            <p class="progress-subtitle" id="currentTask">初始化中...</p>
+                        </div>
+                        
+                        <div class="progress-stats">
+                            <div class="stat-item">
+                                <span class="stat-value" id="completedCount">0</span>
+                                <span class="stat-label">已完成</span>
+                            </div>
+                            <div class="stat-divider"></div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="totalCount">0</span>
+                                <span class="stat-label">总段落</span>
+                            </div>
+                            <div class="stat-divider"></div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="estimatedTime">--</span>
+                                <span class="stat-label">预计剩余</span>
+                            </div>
+                        </div>
+                        
+                        <div class="progress-pages">
+                            <span>翻译页面：</span>
+                            <span id="progressPages">第 1 - 10 页</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 完成面板 -->
+                    <div class="result-panel" id="resultPanel" style="display: none;">
+                        <div class="result-success">
+                            <div class="success-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </div>
+                            <h2>翻译完成</h2>
+                            <p class="result-summary" id="resultSummary">已翻译 10 页，共 45 个段落</p>
+                        </div>
+                        
+                        <div class="result-actions">
+                            <button class="action-btn primary" id="viewCompare">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
+                                </svg>
+                                对比阅读
+                            </button>
+                            <button class="action-btn" id="downloadTranslated">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+                                </svg>
+                                下载译文
+                            </button>
+                            <button class="action-btn secondary" id="downloadBilingual">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                                </svg>
+                                双语对照
+                            </button>
+                        </div>
+                        
+                        <button class="back-to-config" id="backToConfig">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
+                            </svg>
+                            返回重新配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 对比阅读视图 -->
+            <div class="view-panel" id="compareView" style="display: none;">
+                <header class="header compare-header">
+                    <div class="header-left">
+                        <button class="back-btn" id="backToTranslate">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
+                            </svg>
+                        </button>
+                        <h1 class="page-title">对比阅读</h1>
+                    </div>
+                    <div class="page-navigator">
+                        <button class="nav-btn" id="prevPage" title="上一页 (←)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15.75 19.5L8.25 12l7.5-7.5"/>
+                            </svg>
+                        </button>
+                        <span class="page-indicator">
+                            第 <span id="currentPage">1</span> 页
+                            <span class="page-sep">/</span>
+                            共 <span id="totalPagesNav">10</span> 页
+                        </span>
+                        <button class="nav-btn" id="nextPage" title="下一页 (→)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="zoom-controls">
+                        <button class="zoom-btn" id="zoomOut" title="缩小 (-)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM13.5 10.5h-6"/>
+                            </svg>
+                        </button>
+                        <span class="zoom-level" id="zoomLevel">100%</span>
+                        <button class="zoom-btn" id="zoomIn" title="放大 (+)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/>
+                            </svg>
+                        </button>
+                    </div>
+                </header>
+                
+                <div class="compare-container">
+                    <!-- 原文 PDF -->
+                    <div class="compare-panel original">
+                        <div class="panel-header">
+                            <span class="panel-label">原文 · PDF</span>
+                        </div>
+                        <div class="panel-content" id="pdfContainer">
+                            <canvas id="pdfCanvas"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- 分隔线 -->
+                    <div class="compare-divider" id="compareDivider">
+                        <div class="divider-handle"></div>
+                    </div>
+                    
+                    <!-- 译文 -->
+                    <div class="compare-panel translation">
+                        <div class="panel-header">
+                            <span class="panel-label">译文 · 中文</span>
+                        </div>
+                        <div class="panel-content" id="translationContainer">
+                            <div class="translation-content" id="translationContent">
+                                <!-- 翻译内容将在这里显示 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 历史记录视图 -->
+            <div class="view-panel" id="historyView" style="display: none;">
+                <header class="header">
+                    <div class="header-left">
+                        <h1 class="page-title">翻译历史</h1>
+                        <p class="page-subtitle">查看和管理历史翻译记录</p>
+                    </div>
+                </header>
+                
+                <div class="content-wrapper history-wrapper">
+                    <div class="history-list" id="historyList">
+                        <!-- 历史记录将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
