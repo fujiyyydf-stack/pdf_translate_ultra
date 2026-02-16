@@ -784,8 +784,9 @@ async function startTranslation() {
     }
     
     try {
-        // 获取配置
-        const model = elements.modelSelect?.value || 'x-ai/grok-4.1-fast';
+        // 获取 Flash 模式的模型配置
+        const flashConfig = getModelConfigFromWidget(document.getElementById('flashModelWidget'));
+        const model = flashConfig.model || 'x-ai/grok-4.1-fast';
         const workers = parseInt(elements.workers?.value) || 5;
         
         // 获取当前提示词（从textarea获取最新值）
@@ -800,6 +801,8 @@ async function startTranslation() {
             start_page: start,
             end_page: end,
             model: model,
+            base_url: flashConfig.base_url,
+            api_key: flashConfig.api_key,
             workers: workers,
             system_prompt: state.systemPrompt
         };
@@ -812,13 +815,18 @@ async function startTranslation() {
                 state.integrationPrompt = integrationPromptEl.value;
             }
             
-            // 获取每个模型的独立配置（模型+提示词）
+            // 获取每个模型的独立配置（模型+提示词+URL+Key）
             const modelConfigs = getMultiModelConfigs();
+            const integrationConfig = getIntegrationModel();
             
             requestBody.multi_model = true;
             requestBody.translation_models = modelConfigs.map(c => c.model);
-            requestBody.model_prompts = modelConfigs.map(c => c.prompt);  // 每个模型的独立提示词
-            requestBody.integration_model = getIntegrationModel();
+            requestBody.model_prompts = modelConfigs.map(c => c.prompt);
+            requestBody.model_base_urls = modelConfigs.map(c => c.base_url);
+            requestBody.model_api_keys = modelConfigs.map(c => c.api_key);
+            requestBody.integration_model = integrationConfig.model || 'x-ai/grok-4.1-fast';
+            requestBody.integration_base_url = integrationConfig.base_url;
+            requestBody.integration_api_key = integrationConfig.api_key;
             requestBody.integration_prompt = state.integrationPrompt;
         }
         
@@ -840,7 +848,7 @@ async function startTranslation() {
         state.taskId = data.task_id;
         state.currentModel = model;
         state.translationModels = state.mode === 'high' ? getSelectedMultiModels() : [model];
-        state.integrationModel = state.mode === 'high' ? getIntegrationModel() : null;
+        state.integrationModel = state.mode === 'high' ? getIntegrationModel().model : null;
         console.log('Translation started, task_id:', state.taskId);
         
         // 开始轮询进度
@@ -1365,7 +1373,7 @@ function initElements() {
         startPage: document.getElementById('startPage'),
         endPage: document.getElementById('endPage'),
         rangeInfo: document.getElementById('rangeInfo'),
-        modelSelect: document.getElementById('modelSelect'),
+        modelInput: document.getElementById('modelInput'),
         workers: document.getElementById('workers'),
         startBtn: document.getElementById('startBtn'),
         
@@ -1415,7 +1423,7 @@ let availableModels = [];
 let volcengineModels = [];
 let deepseekModels = [];
 let customModels = [];
-let allModels = [];  // 所有模型的合并列表
+let allModels = [];
 
 async function loadModels() {
     try {
@@ -1427,7 +1435,6 @@ async function loadModels() {
             deepseekModels = data.deepseek_models || [];
             customModels = data.custom_models || [];
             
-            // 合并所有模型
             allModels = [
                 ...availableModels,
                 ...volcengineModels,
@@ -1435,21 +1442,8 @@ async function loadModels() {
                 ...customModels
             ];
             
-            // 更新主模型选择器
-            if (elements.modelSelect && availableModels.length > 0) {
-                elements.modelSelect.innerHTML = buildModelOptions(allModels);
-            }
-            
-            // 更新整合模型选择器
-            const integrationSelect = document.getElementById('integrationModel');
-            if (integrationSelect && availableModels.length > 0) {
-                integrationSelect.innerHTML = buildModelOptions(allModels);
-            }
-            
-            // 初始化多模型列表（默认3个）
+            populateModelSuggestions();
             initMultiModelList();
-            
-            // 初始化 Editor 模型列表
             initEditorModelList();
         }
     } catch (error) {
@@ -1457,203 +1451,46 @@ async function loadModels() {
     }
 }
 
-// 构建模型选项（分组显示）
-function buildModelOptions(models, selectedId = null) {
+function populateModelSuggestions() {
+    const datalist = document.getElementById('modelSuggestions');
+    if (!datalist) return;
+    
     let html = '';
-    
-    // 按 provider 分组
-    const groups = {};
-    models.forEach(m => {
-        const provider = m.provider || 'other';
-        if (!groups[provider]) groups[provider] = [];
-        groups[provider].push(m);
+    allModels.forEach(m => {
+        const label = m.name !== m.id ? `${m.name} (${m.id})` : m.id;
+        html += `<option value="${m.id}" label="${label}"></option>`;
     });
+    datalist.innerHTML = html;
+}
+
+function toggleApiConfig(widgetId) {
+    const widget = document.getElementById(widgetId);
+    if (!widget) return;
     
-    // 提供商显示名称
-    const providerNames = {
-        'openrouter': 'OpenRouter',
-        'volcengine': '火山引擎 (豆包)',
-        'deepseek': 'DeepSeek',
-        'custom': '自定义模型',
-        'other': '其他'
+    const configDiv = widget.querySelector('.model-api-config');
+    const btn = widget.querySelector('.model-config-btn');
+    if (!configDiv) return;
+    
+    const isHidden = configDiv.style.display === 'none';
+    configDiv.style.display = isHidden ? 'flex' : 'none';
+    if (btn) btn.classList.toggle('active', isHidden);
+}
+
+function getModelConfigFromWidget(container) {
+    if (!container) return { model: '', base_url: '', api_key: '' };
+    
+    const nameInput = container.querySelector('.model-name-input');
+    const urlInput = container.querySelector('.model-url-input');
+    const keyInput = container.querySelector('.model-key-input');
+    return {
+        model: nameInput?.value?.trim() || '',
+        base_url: urlInput?.value?.trim() || '',
+        api_key: keyInput?.value?.trim() || ''
     };
-    
-    // 按顺序输出分组
-    const order = ['openrouter', 'volcengine', 'deepseek', 'custom', 'other'];
-    for (const provider of order) {
-        if (groups[provider] && groups[provider].length > 0) {
-            html += `<optgroup label="${providerNames[provider] || provider}">`;
-            groups[provider].forEach(m => {
-                const selected = selectedId === m.id ? 'selected' : '';
-                const dataAttrs = m.base_url ? `data-base-url="${m.base_url}"` : '';
-                html += `<option value="${m.id}" ${selected} ${dataAttrs}>${m.name}</option>`;
-            });
-            html += `</optgroup>`;
-        }
-    }
-    
-    return html;
 }
 
-// 添加自定义模型 - 显示模态框
-function addCustomModel() {
-    showCustomModelModal();
-}
-
-// 显示自定义模型配置模态框
-function showCustomModelModal() {
-    // 如果已存在，先移除
-    const existing = document.getElementById('customModelModal');
-    if (existing) existing.remove();
-    
-    const modal = document.createElement('div');
-    modal.id = 'customModelModal';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content custom-model-modal">
-            <div class="modal-header">
-                <h3>添加自定义模型</h3>
-                <button class="modal-close" onclick="closeCustomModelModal()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                        <path d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>模型名称 <span class="required">*</span></label>
-                    <input type="text" id="customModelName" placeholder="如: doubao-1.5-pro-256k, deepseek-chat">
-                    <p class="hint">API 调用时使用的模型名称</p>
-                </div>
-                <div class="form-group">
-                    <label>显示名称</label>
-                    <input type="text" id="customModelDisplayName" placeholder="如: 豆包 1.5 Pro">
-                    <p class="hint">在下拉菜单中显示的名称（可选）</p>
-                </div>
-                <div class="form-group">
-                    <label>API Base URL <span class="required">*</span></label>
-                    <input type="text" id="customModelBaseUrl" placeholder="如: https://ark.cn-beijing.volces.com/api/v3">
-                    <p class="hint">模型 API 的基础地址</p>
-                </div>
-                <div class="form-group">
-                    <label>API Key</label>
-                    <input type="password" id="customModelApiKey" placeholder="留空则使用默认 API Key">
-                    <p class="hint">该模型专用的 API Key（可选）</p>
-                </div>
-                
-                <div class="preset-configs">
-                    <p class="preset-title">快速填充：</p>
-                    <div class="preset-buttons">
-                        <button type="button" class="preset-btn" onclick="fillPreset('volcengine')">
-                            🌋 火山引擎
-                        </button>
-                        <button type="button" class="preset-btn" onclick="fillPreset('deepseek')">
-                            🔍 DeepSeek
-                        </button>
-                        <button type="button" class="preset-btn" onclick="fillPreset('moonshot')">
-                            🌙 Moonshot
-                        </button>
-                        <button type="button" class="preset-btn" onclick="fillPreset('zhipu')">
-                            🧠 智谱AI
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn-secondary" onclick="closeCustomModelModal()">取消</button>
-                <button type="button" class="btn-primary" onclick="saveCustomModel()">添加模型</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // 点击背景关闭
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeCustomModelModal();
-    });
-}
-
-// 关闭模态框
-function closeCustomModelModal() {
-    const modal = document.getElementById('customModelModal');
-    if (modal) modal.remove();
-}
-
-// 快速填充预设配置
-function fillPreset(provider) {
-    const presets = {
-        volcengine: {
-            baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-            modelName: 'doubao-1.5-pro-256k',
-            displayName: '豆包 1.5 Pro 256K'
-        },
-        deepseek: {
-            baseUrl: 'https://api.deepseek.com/v1',
-            modelName: 'deepseek-chat',
-            displayName: 'DeepSeek Chat'
-        },
-        moonshot: {
-            baseUrl: 'https://api.moonshot.cn/v1',
-            modelName: 'moonshot-v1-128k',
-            displayName: 'Moonshot 128K'
-        },
-        zhipu: {
-            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-            modelName: 'glm-4-flash',
-            displayName: '智谱 GLM-4 Flash'
-        }
-    };
-    
-    const preset = presets[provider];
-    if (preset) {
-        document.getElementById('customModelName').value = preset.modelName;
-        document.getElementById('customModelDisplayName').value = preset.displayName;
-        document.getElementById('customModelBaseUrl').value = preset.baseUrl;
-    }
-}
-
-// 保存自定义模型
-async function saveCustomModel() {
-    const modelName = document.getElementById('customModelName').value.trim();
-    const displayName = document.getElementById('customModelDisplayName').value.trim();
-    const baseUrl = document.getElementById('customModelBaseUrl').value.trim();
-    const apiKey = document.getElementById('customModelApiKey').value.trim();
-    
-    if (!modelName) {
-        alert('请输入模型名称');
-        return;
-    }
-    if (!baseUrl) {
-        alert('请输入 API Base URL');
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/models/custom`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: modelName,
-                id: modelName,
-                name: displayName || modelName,
-                base_url: baseUrl,
-                api_key: apiKey,
-                provider: 'custom'
-            })
-        });
-        
-        if (response.ok) {
-            closeCustomModelModal();
-            await loadModels();  // 重新加载模型列表
-            alert('自定义模型添加成功！');
-        } else {
-            const error = await response.json();
-            alert('添加失败: ' + (error.error || '未知错误'));
-        }
-    } catch (error) {
-        alert('添加失败: ' + error.message);
-    }
+function getGearIconSVG() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
 }
 
 // 多模型管理
@@ -1678,22 +1515,39 @@ function addMultiModel(defaultValue = null, defaultPrompt = null) {
     
     multiModelCount++;
     const index = multiModelCount;
+    const widgetId = `multiModel_${index}`;
     
     const item = document.createElement('div');
     item.className = 'multi-model-item';
     item.dataset.index = index;
     
-    const options = buildModelOptions(allModels.length > 0 ? allModels : availableModels, defaultValue);
-    
+    const modelValue = defaultValue || 'x-ai/grok-4.1-fast';
     const promptValue = defaultPrompt || DEFAULT_SYSTEM_PROMPT;
     const promptPreview = promptValue.substring(0, 60) + '...';
     
     item.innerHTML = `
         <div class="model-row">
             <span class="model-number">${index}</span>
-            <select class="model-select" data-model-index="${index}">
-                ${options}
-            </select>
+            <div class="model-input-group" id="${widgetId}">
+                <div class="model-input-main">
+                    <input type="text" class="model-name-input" data-model-index="${index}"
+                           list="modelSuggestions" value="${modelValue}"
+                           placeholder="输入模型名称">
+                    <button type="button" class="model-config-btn" onclick="toggleApiConfig('${widgetId}')" title="API 配置">
+                        ${getGearIconSVG()}
+                    </button>
+                </div>
+                <div class="model-api-config" style="display: none;">
+                    <div class="api-field">
+                        <label>Base URL</label>
+                        <input type="text" class="model-url-input" placeholder="留空使用默认">
+                    </div>
+                    <div class="api-field">
+                        <label>API Key</label>
+                        <input type="password" class="model-key-input" placeholder="留空使用默认">
+                    </div>
+                </div>
+            </div>
             <button type="button" class="prompt-edit-btn" onclick="toggleModelPrompt(${index})" title="编辑提示词">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                     <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/>
@@ -1782,8 +1636,8 @@ function getSelectedMultiModels() {
     const container = document.getElementById('multiModelList');
     if (!container) return [];
     
-    const selects = container.querySelectorAll('.model-select');
-    return Array.from(selects).map(select => select.value);
+    const inputs = container.querySelectorAll('.model-name-input');
+    return Array.from(inputs).map(input => input.value.trim()).filter(v => v);
 }
 
 function getMultiModelConfigs() {
@@ -1792,18 +1646,20 @@ function getMultiModelConfigs() {
     
     const items = container.querySelectorAll('.multi-model-item');
     return Array.from(items).map(item => {
-        const select = item.querySelector('.model-select');
+        const config = getModelConfigFromWidget(item.querySelector('.model-input-group'));
         const textarea = item.querySelector('.model-prompt-textarea');
         return {
-            model: select ? select.value : '',
+            model: config.model,
+            base_url: config.base_url,
+            api_key: config.api_key,
             prompt: textarea ? textarea.value : DEFAULT_SYSTEM_PROMPT
         };
     });
 }
 
 function getIntegrationModel() {
-    const select = document.getElementById('integrationModel');
-    return select ? select.value : 'x-ai/grok-4.1-fast';
+    const widget = document.getElementById('integrationModelWidget');
+    return getModelConfigFromWidget(widget);
 }
 
 // ============================================
@@ -2188,33 +2044,13 @@ function initEditorModelList() {
     const container = document.getElementById('editorModelList');
     if (!container) return;
     
-    // 如果模型列表为空，等待加载
-    const models = allModels.length > 0 ? allModels : availableModels;
-    if (models.length === 0) {
-        console.log('Models not loaded yet, will retry...');
-        return;
-    }
-    
     container.innerHTML = '';
     editorModelCount = 0;
     
-    // 默认添加2个模型，都使用 grok-4.1-fast
     addEditorModel('x-ai/grok-4.1-fast');
     addEditorModel('x-ai/grok-4.1-fast');
     
-    // 初始化编辑模型选择器，默认也是 grok-4.1-fast
-    const editorModelSelect = document.getElementById('editorModelSelect');
-    if (editorModelSelect && models.length > 0) {
-        editorModelSelect.innerHTML = buildModelOptions(models, 'x-ai/grok-4.1-fast');
-    }
-    
-    // 初始化对齐模型选择器
-    const alignmentModelSelect = document.getElementById('alignmentModelSelect');
-    if (alignmentModelSelect && models.length > 0) {
-        alignmentModelSelect.innerHTML = buildModelOptions(models, 'x-ai/grok-4.1-fast');
-    }
-    
-    console.log('Editor model list initialized with', models.length, 'models');
+    console.log('Editor model list initialized');
 }
 
 function addEditorModel(defaultValue = null) {
@@ -2223,19 +2059,36 @@ function addEditorModel(defaultValue = null) {
     
     editorModelCount++;
     const index = editorModelCount;
+    const widgetId = `editorTransModel_${index}`;
+    
+    const modelValue = defaultValue || 'x-ai/grok-4.1-fast';
     
     const item = document.createElement('div');
     item.className = 'editor-model-item';
     item.dataset.index = index;
     
-    const models = allModels.length > 0 ? allModels : availableModels;
-    const options = buildModelOptions(models, defaultValue);
-    
     item.innerHTML = `
         <span class="model-number">${index}</span>
-        <select class="model-select" data-editor-model-index="${index}">
-            ${options}
-        </select>
+        <div class="model-input-group" id="${widgetId}">
+            <div class="model-input-main">
+                <input type="text" class="model-name-input" data-editor-model-index="${index}"
+                       list="modelSuggestions" value="${modelValue}"
+                       placeholder="输入模型名称">
+                <button type="button" class="model-config-btn" onclick="toggleApiConfig('${widgetId}')" title="API 配置">
+                    ${getGearIconSVG()}
+                </button>
+            </div>
+            <div class="model-api-config" style="display: none;">
+                <div class="api-field">
+                    <label>Base URL</label>
+                    <input type="text" class="model-url-input" placeholder="留空使用默认">
+                </div>
+                <div class="api-field">
+                    <label>API Key</label>
+                    <input type="password" class="model-key-input" placeholder="留空使用默认">
+                </div>
+            </div>
+        </div>
         <button type="button" class="remove-model-btn" onclick="removeEditorModel(${index})" title="移除">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 18L18 6M6 6l12 12"/>
@@ -2271,41 +2124,24 @@ function getEditorTranslationModels() {
     const container = document.getElementById('editorModelList');
     if (!container) return [];
     
-    const selects = container.querySelectorAll('.model-select');
-    return Array.from(selects).map(s => {
-        const modelId = s.value;
-        // 查找完整的模型配置
-        const models = allModels.length > 0 ? allModels : availableModels;
-        const modelConfig = models.find(m => m.id === modelId);
-        
-        if (modelConfig && (modelConfig.base_url || modelConfig.api_key)) {
-            // 返回完整配置
+    const items = container.querySelectorAll('.editor-model-item');
+    return Array.from(items).map(item => {
+        const config = getModelConfigFromWidget(item.querySelector('.model-input-group'));
+        if (config.base_url || config.api_key) {
             return {
-                model: modelId,
-                name: modelConfig.name || modelId,
-                base_url: modelConfig.base_url || '',
-                api_key: modelConfig.api_key || ''
+                model: config.model,
+                name: config.model,
+                base_url: config.base_url,
+                api_key: config.api_key
             };
         }
-        // 普通模型只返回ID
-        return modelId;
+        return config.model;
     });
 }
 
-// 获取单个模型的完整配置
-function getModelConfig(modelId) {
-    const models = allModels.length > 0 ? allModels : availableModels;
-    const modelConfig = models.find(m => m.id === modelId);
-    
-    if (modelConfig && (modelConfig.base_url || modelConfig.api_key)) {
-        return {
-            model: modelId,
-            name: modelConfig.name || modelId,
-            base_url: modelConfig.base_url || '',
-            api_key: modelConfig.api_key || ''
-        };
-    }
-    return modelId;
+function getModelConfig(widgetId) {
+    const widget = document.getElementById(widgetId);
+    return getModelConfigFromWidget(widget);
 }
 
 async function startEditorTask() {
@@ -2322,14 +2158,19 @@ async function startEditorTask() {
     
     try {
         const translationModels = getEditorTranslationModels();
-        const editorModelSelect = document.getElementById('editorModelSelect');
-        const alignmentModelSelect = document.getElementById('alignmentModelSelect');
         const editorPromptTextarea = document.getElementById('editorPrompt');
         const workersEl = document.getElementById('editorWorkers');
         
         // 获取编辑模型和对齐模型的完整配置
-        const editorModelId = editorModelSelect?.value || 'x-ai/grok-4.1-fast';
-        const alignmentModelId = alignmentModelSelect?.value || 'x-ai/grok-4.1-fast';
+        const editorModelConfig = getModelConfigFromWidget(document.getElementById('editorModelWidget'));
+        const alignmentModelConfig = getModelConfigFromWidget(document.getElementById('alignmentModelWidget'));
+        
+        const editorModel = editorModelConfig.base_url || editorModelConfig.api_key
+            ? editorModelConfig
+            : (editorModelConfig.model || 'x-ai/grok-4.1-fast');
+        const alignmentModel = alignmentModelConfig.base_url || alignmentModelConfig.api_key
+            ? alignmentModelConfig
+            : (alignmentModelConfig.model || 'x-ai/grok-4.1-fast');
         
         const requestData = {
             pdf_path: state.editor.pdfPath,
@@ -2337,8 +2178,8 @@ async function startEditorTask() {
             start_page: state.editor.startPage,
             end_page: state.editor.endPage,
             translation_models: translationModels,
-            editor_model: getModelConfig(editorModelId),
-            alignment_model: getModelConfig(alignmentModelId),
+            editor_model: editorModel,
+            alignment_model: alignmentModel,
             editor_prompt: editorPromptTextarea?.value || DEFAULT_EDITOR_PROMPT,
             workers: parseInt(workersEl?.value) || 5
         };
@@ -2475,3 +2316,4 @@ window.toggleModelPrompt = toggleModelPrompt;
 window.resetModelPrompt = resetModelPrompt;
 window.saveModelPrompt = saveModelPrompt;
 window.removeEditorModel = removeEditorModel;
+window.toggleApiConfig = toggleApiConfig;

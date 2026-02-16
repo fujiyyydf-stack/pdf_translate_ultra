@@ -2203,3 +2203,151 @@ body {
     border-color: var(--accent-color);
     color: var(--accent-color);
 }
+
+/* ============================================
+   Model Input Widget - Custom Model Support
+   ============================================ */
+
+.model-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.model-input-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-name-input {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    transition: all 0.25s ease;
+}
+
+.model-name-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.model-name-input::placeholder {
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+}
+
+.model-config-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.model-config-btn:hover,
+.model-config-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-bg);
+}
+
+.model-config-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.model-api-config {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    animation: fadeSlideUp 0.2s ease;
+}
+
+.model-api-config .api-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.model-api-config .api-field label {
+    font-size: 11px !important;
+    color: var(--text-muted) !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    font-weight: 400 !important;
+}
+
+.model-api-config input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    transition: all 0.25s ease;
+}
+
+.model-api-config input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+.model-api-config input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Multi-model / Editor model item with input widget */
+.multi-model-item .model-input-group,
+.editor-model-item .model-input-group {
+    flex: 1;
+    min-width: 0;
+}
+
+.multi-model-item .model-input-main,
+.editor-model-item .model-input-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.multi-model-item .model-name-input,
+.editor-model-item .model-name-input {
+    padding: 10px 14px;
+    font-size: 13px;
+}
+
+.multi-model-item .model-api-config,
+.editor-model-item .model-api-config {
+    margin-top: 4px;
+}
+
+/* Integration model input widget */
+.integration-model-section .model-input-group {
+    margin-top: 8px;
+}
+
+.integration-model-section .model-name-input {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+}

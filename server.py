@@ -332,10 +332,14 @@ def run_multi_model_translation(task_id: str, pdf_path: str, config: dict):
     system_prompt = config.get('system_prompt')  # 默认提示词
     integration_prompt = config.get('integration_prompt')
     
+    # 使用请求中的 API 配置，如果没有则回退到环境变量
+    api_key = config.get('api_key') or os.getenv("OPENAI_API_KEY")
+    base_url = config.get('base_url') or os.getenv("OPENAI_BASE_URL")
+    
     # 创建多模型翻译器
     translator = MultiModelTranslator(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL"),
+        api_key=api_key,
+        base_url=base_url,
         translation_models=translation_models,
         integration_model=integration_model,
         output_dir=str(OUTPUT_FOLDER),
