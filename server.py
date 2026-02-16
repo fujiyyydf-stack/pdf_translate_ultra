@@ -462,10 +462,14 @@ def upload_file():
     })
 
 
+# 自定义模型存储
+custom_models = []
+
 @app.route('/api/models', methods=['GET'])
 def get_models():
     """获取可用模型列表"""
-    models = [
+    # 预置模型（OpenRouter）
+    preset_models = [
         {'id': 'x-ai/grok-4.1-fast', 'name': 'Grok 4.1 Fast', 'provider': 'openrouter'},
         {'id': 'anthropic/claude-sonnet-4', 'name': 'Claude Sonnet 4', 'provider': 'openrouter'},
         {'id': 'google/gemini-3-flash-preview', 'name': 'gemini-3-flash', 'provider': 'openrouter'},
@@ -473,7 +477,100 @@ def get_models():
         {'id': 'google/gemini-2.5-pro-preview', 'name': 'Gemini 2.5 Pro', 'provider': 'openrouter'},
         {'id': 'google/gemini-2.5-flash-preview', 'name': 'Gemini 2.5 Flash', 'provider': 'openrouter'},
     ]
-    return jsonify({'models': models})
+    
+    # 预置的火山引擎豆包模型
+    volcengine_models = [
+        {
+            'id': 'doubao-1.5-pro-256k',
+            'name': '豆包 1.5 Pro 256K',
+            'provider': 'volcengine',
+            'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
+            'requires_api_key': True,
+            'description': '火山引擎豆包大模型，需配置火山引擎 API Key'
+        },
+        {
+            'id': 'doubao-1.5-pro-32k',
+            'name': '豆包 1.5 Pro 32K',
+            'provider': 'volcengine',
+            'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
+            'requires_api_key': True,
+            'description': '火山引擎豆包大模型，需配置火山引擎 API Key'
+        },
+        {
+            'id': 'doubao-pro-32k',
+            'name': '豆包 Pro 32K',
+            'provider': 'volcengine',
+            'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
+            'requires_api_key': True,
+            'description': '火山引擎豆包大模型，需配置火山引擎 API Key'
+        },
+    ]
+    
+    # DeepSeek 模型
+    deepseek_models = [
+        {
+            'id': 'deepseek-chat',
+            'name': 'DeepSeek Chat',
+            'provider': 'deepseek',
+            'base_url': 'https://api.deepseek.com/v1',
+            'requires_api_key': True,
+            'description': 'DeepSeek 官方 API'
+        },
+        {
+            'id': 'deepseek-reasoner',
+            'name': 'DeepSeek Reasoner',
+            'provider': 'deepseek',
+            'base_url': 'https://api.deepseek.com/v1',
+            'requires_api_key': True,
+            'description': 'DeepSeek R1 推理模型'
+        },
+    ]
+    
+    return jsonify({
+        'models': preset_models,
+        'volcengine_models': volcengine_models,
+        'deepseek_models': deepseek_models,
+        'custom_models': custom_models
+    })
+
+
+@app.route('/api/models/custom', methods=['POST'])
+def add_custom_model():
+    """添加自定义模型"""
+    data = request.json
+    
+    if not data.get('model'):
+        return jsonify({'error': '缺少模型名称'}), 400
+    
+    model_config = {
+        'id': data.get('id', data['model']),
+        'model': data['model'],
+        'name': data.get('name', data['model']),
+        'provider': data.get('provider', 'custom'),
+        'base_url': data.get('base_url', ''),
+        'api_key': data.get('api_key', ''),  # 注意：生产环境不应明文存储
+        'description': data.get('description', '自定义模型')
+    }
+    
+    # 检查是否已存在
+    existing = next((m for m in custom_models if m['id'] == model_config['id']), None)
+    if existing:
+        custom_models.remove(existing)
+    
+    custom_models.append(model_config)
+    
+    return jsonify({
+        'success': True,
+        'model': model_config
+    })
+
+
+@app.route('/api/models/custom/<model_id>', methods=['DELETE'])
+def delete_custom_model(model_id):
+    """删除自定义模型"""
+    global custom_models
+    custom_models = [m for m in custom_models if m['id'] != model_id]
+    return jsonify({'success': True})
 
 
 @app.route('/api/translate', methods=['POST'])
@@ -718,6 +815,221 @@ def export_pdf():
     return jsonify({
         'content': pdf_base64,
         'filename': f'{filename}.pdf'
+    })
+
+
+# ============================================
+# Editor Mode Routes
+# ============================================
+
+@app.route('/api/editor/upload-word', methods=['POST'])
+def upload_word():
+    """上传 Word 译文文件"""
+    if 'file' not in request.files:
+        return jsonify({'error': '没有文件'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': '没有选择文件'}), 400
+    
+    if not file.filename.lower().endswith(('.docx', '.doc')):
+        return jsonify({'error': '只支持 Word 文件 (.docx)'}), 400
+    
+    import uuid
+    file_id = str(uuid.uuid4())[:8]
+    filename = f"{file_id}_{file.filename}"
+    filepath = UPLOAD_FOLDER / filename
+    file.save(filepath)
+    
+    # 提取段落数
+    try:
+        from word_processor import WordProcessor
+        processor = WordProcessor()
+        paragraphs = processor.extract_paragraphs(str(filepath))
+        para_count = len(paragraphs)
+        stats = processor.get_document_stats(str(filepath))
+    except Exception as e:
+        return jsonify({'error': f'无法读取 Word 文件: {str(e)}'}), 400
+    
+    return jsonify({
+        'file_id': file_id,
+        'filename': file.filename,
+        'path': str(filepath),
+        'paragraph_count': para_count,
+        'stats': stats
+    })
+
+
+@app.route('/api/editor/start', methods=['POST'])
+def start_editor_task():
+    """开始编辑任务"""
+    data = request.json
+    
+    pdf_path = data.get('pdf_path')
+    word_path = data.get('word_path')
+    
+    if not pdf_path or not word_path:
+        return jsonify({'error': '缺少 PDF 或 Word 文件路径'}), 400
+    
+    import uuid
+    task_id = str(uuid.uuid4())[:8]
+    
+    translation_tasks[task_id] = {
+        'id': task_id,
+        'type': 'editor',
+        'status': 'pending',
+        'progress': 0,
+        'total_paragraphs': 0,
+        'completed_paragraphs': 0,
+        'results': None,
+        'output_files': None,
+        'error': None,
+        'created_at': datetime.now().isoformat()
+    }
+    
+    # 后台线程运行
+    thread = threading.Thread(
+        target=run_editor_task,
+        args=(task_id, pdf_path, word_path, data)
+    )
+    thread.start()
+    
+    return jsonify({'task_id': task_id})
+
+
+def run_editor_task(task_id: str, pdf_path: str, word_path: str, config: dict):
+    """运行编辑任务"""
+    try:
+        task = translation_tasks[task_id]
+        task['status'] = 'processing'
+        task['started_at'] = datetime.now().isoformat()
+        
+        from editor_service import EditorService
+        
+        # 解析翻译模型配置
+        # 支持两种格式:
+        # 1. 字符串列表: ["model1", "model2"]
+        # 2. 配置列表: [{"model": "...", "base_url": "...", "api_key": "...", "name": "..."}, ...]
+        translation_models = config.get('translation_models')
+        if isinstance(translation_models, str):
+            translation_models = [m.strip() for m in translation_models.split(',')]
+        
+        # 解析编辑模型配置
+        editor_model = config.get('editor_model', 'x-ai/grok-4.1-fast')
+        
+        # 解析对齐模型配置
+        alignment_model = config.get('alignment_model', 'x-ai/grok-4.1-fast')
+        
+        # 获取默认 API 配置
+        default_api_key = config.get('api_key', os.getenv('OPENAI_API_KEY'))
+        default_base_url = config.get('base_url', os.getenv('OPENAI_BASE_URL'))
+        
+        editor = EditorService(
+            api_key=default_api_key,
+            base_url=default_base_url,
+            translation_models=translation_models,
+            editor_model=editor_model,
+            editor_prompt=config.get('editor_prompt'),
+            translation_prompts=config.get('translation_prompts'),
+            alignment_model=alignment_model,
+            use_smart_alignment=config.get('use_smart_alignment', True),
+            output_dir=str(OUTPUT_FOLDER)
+        )
+        
+        def progress_callback(completed, total):
+            task['completed_paragraphs'] = completed
+            task['total_paragraphs'] = total
+            task['progress'] = int(completed / total * 100) if total > 0 else 0
+        
+        results = editor.process_document(
+            pdf_path=pdf_path,
+            word_path=word_path,
+            start_page=config.get('start_page'),
+            end_page=config.get('end_page'),
+            max_workers=config.get('workers', 5),
+            progress_callback=progress_callback
+        )
+        
+        # 生成输出文件
+        base_name = Path(pdf_path).stem
+        output_files = editor.generate_output_files(results, base_name)
+        
+        task['results'] = results
+        task['output_files'] = output_files
+        task['status'] = 'completed'
+        task['completed_at'] = datetime.now().isoformat()
+        
+    except Exception as e:
+        task = translation_tasks[task_id]
+        task['status'] = 'error'
+        task['error'] = str(e)
+        import traceback
+        traceback.print_exc()
+
+
+@app.route('/api/editor/task/<task_id>', methods=['GET'])
+def get_editor_task_status(task_id):
+    """获取编辑任务状态"""
+    task = translation_tasks.get(task_id)
+    if not task:
+        return jsonify({'error': '任务不存在'}), 404
+    
+    return jsonify({
+        'id': task['id'],
+        'type': task.get('type', 'editor'),
+        'status': task['status'],
+        'progress': task['progress'],
+        'total_paragraphs': task.get('total_paragraphs', 0),
+        'completed_paragraphs': task.get('completed_paragraphs', 0),
+        'error': task.get('error'),
+        'output_files': task.get('output_files')
+    })
+
+
+@app.route('/api/editor/task/<task_id>/results', methods=['GET'])
+def get_editor_task_results(task_id):
+    """获取编辑任务结果"""
+    task = translation_tasks.get(task_id)
+    if not task:
+        return jsonify({'error': '任务不存在'}), 404
+    
+    if task['status'] != 'completed':
+        return jsonify({'error': '任务未完成'}), 400
+    
+    results = task.get('results', {})
+    
+    # 转换为前端友好的格式
+    paragraphs = []
+    for para in results.get('paragraphs', []):
+        paragraphs.append({
+            'page': para.get('page', 0),
+            'source_index': para.get('source_index', 0),
+            'source_text': para.get('source_text', ''),
+            'user_translation': para.get('target_text', ''),
+            'ai_translations': para.get('ai_translations', {}),
+            'review': para.get('review', ''),
+            'final': para.get('final', ''),
+            'matched': para.get('matched', False),
+            'edited': para.get('edited', False),
+            'confidence': para.get('confidence', 0)
+        })
+    
+    return jsonify({
+        'paragraphs': paragraphs,
+        'stats': results.get('stats', {}),
+        'output_files': task.get('output_files', {})
+    })
+
+
+@app.route('/api/editor/prompts', methods=['GET'])
+def get_editor_prompts():
+    """获取默认编辑提示词"""
+    from editor_service import EditorService
+    
+    return jsonify({
+        'editor_prompt': EditorService.DEFAULT_EDITOR_PROMPT,
+        'translation_prompt': EditorService.DEFAULT_TRANSLATION_PROMPT,
+        'integration_prompt': EditorService.DEFAULT_INTEGRATION_PROMPT
     })
 
 

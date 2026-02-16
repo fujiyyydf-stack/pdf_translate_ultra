@@ -1,6 +1,9 @@
 # PDF处理
 pymupdf>=1.23.0
 
+# Word文档处理
+python-docx>=0.8.11
+
 # API客户端
 openai>=1.0.0
 

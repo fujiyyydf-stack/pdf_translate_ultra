@@ -28,6 +28,42 @@ const DEFAULT_INTEGRATION_PROMPT = `你是一位资深的翻译编辑和校对�
 - 语句流畅自然
 - 直接输出最终翻译，不要解释`;
 
+const DEFAULT_EDITOR_PROMPT = `你是一位资深的翻译编辑，同时精通法语和中文，拥有丰富的出版编辑经验。
+
+你将收到：
+1. 法语原文
+2. 用户自己的中文译文（初稿）
+3. 多个 AI 模型的翻译版本
+
+## 你的角色
+
+### 角色1：翻译者
+- 独立理解原文，判断各译文的准确性
+- 识别翻译中的错误（漏译、误译、过译）
+
+### 角色2：严厉的编辑
+- 以出版标准审视译文质量
+- 检查术语准确性、行文流畅度、风格一致性
+- 给出具体的修改建议
+
+## 输出格式
+
+[评审意见]
+对用户译文的简要评价：
+- 优点：（1-2 句）
+- 问题：（列出主要问题，如有）
+- 参考：（说明从 AI 译文中借鉴了什么，如有）
+
+[最终译文]
+打磨后的最佳译文
+
+## 编辑原则
+1. 忠实原文：不得擅自增删内容
+2. 尊重作者：保留用户译文的优秀表达
+3. 取长补短：综合各版本优点
+4. 精益求精：每个词语都要反复推敲
+5. 术语一致：保持专业术语翻译的一致性`;
+
 // State
 const state = {
     pdfFile: null,
@@ -46,7 +82,26 @@ const state = {
     pollInterval: null,
     history: [],  // 翻译历史
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    integrationPrompt: DEFAULT_INTEGRATION_PROMPT
+    integrationPrompt: DEFAULT_INTEGRATION_PROMPT,
+    editorPrompt: DEFAULT_EDITOR_PROMPT,
+    // Editor 模式状态
+    editor: {
+        pdfFile: null,
+        pdfFileId: null,
+        pdfPath: null,
+        pdfTotalPages: 0,
+        wordFile: null,
+        wordFileId: null,
+        wordPath: null,
+        wordParagraphCount: 0,
+        startPage: 1,
+        endPage: 10,
+        translationModels: ['x-ai/grok-4.1-fast', 'anthropic/claude-sonnet-4'],
+        editorModel: 'anthropic/claude-sonnet-4',
+        taskId: null,
+        results: null,
+        isReady: false
+    }
 };
 
 // DOM Elements - will be initialized after DOM is ready
@@ -1091,11 +1146,39 @@ function initEventListeners() {
                 
                 // 切换配置显示
                 const flashConfig = document.getElementById('flashConfig');
-                if (flashConfig) {
-                    flashConfig.style.display = state.mode === 'flash' ? 'flex' : 'none';
-                }
-                if (elements.multiModelConfig) {
-                    elements.multiModelConfig.style.display = state.mode === 'high' ? 'block' : 'none';
+                const editorUploadSection = document.getElementById('editorUploadSection');
+                const uploadSection = document.getElementById('uploadSection');
+                const configPanel = document.getElementById('configPanel');
+                const editorConfigPanel = document.getElementById('editorConfigPanel');
+                
+                if (state.mode === 'editor') {
+                    // Editor 模式：显示双文件上传
+                    if (uploadSection) uploadSection.style.display = 'none';
+                    if (configPanel) configPanel.style.display = 'none';
+                    if (editorUploadSection) editorUploadSection.style.display = state.editor.isReady ? 'none' : 'block';
+                    if (editorConfigPanel) editorConfigPanel.style.display = state.editor.isReady ? 'block' : 'none';
+                    if (flashConfig) flashConfig.style.display = 'none';
+                    if (elements.multiModelConfig) elements.multiModelConfig.style.display = 'none';
+                } else {
+                    // Flash/High 模式
+                    if (editorUploadSection) editorUploadSection.style.display = 'none';
+                    if (editorConfigPanel) editorConfigPanel.style.display = 'none';
+                    
+                    // 根据文件加载状态显示
+                    if (state.isFileLoaded) {
+                        if (uploadSection) uploadSection.style.display = 'none';
+                        if (configPanel) configPanel.style.display = 'block';
+                    } else {
+                        if (uploadSection) uploadSection.style.display = 'block';
+                        if (configPanel) configPanel.style.display = 'none';
+                    }
+                    
+                    if (flashConfig) {
+                        flashConfig.style.display = state.mode === 'flash' ? 'flex' : 'none';
+                    }
+                    if (elements.multiModelConfig) {
+                        elements.multiModelConfig.style.display = state.mode === 'high' ? 'block' : 'none';
+                    }
                 }
             });
         });
@@ -1329,6 +1412,10 @@ function initElements() {
 // ============================================
 
 let availableModels = [];
+let volcengineModels = [];
+let deepseekModels = [];
+let customModels = [];
+let allModels = [];  // 所有模型的合并列表
 
 async function loadModels() {
     try {
@@ -1336,27 +1423,236 @@ async function loadModels() {
         if (response.ok) {
             const data = await response.json();
             availableModels = data.models || [];
+            volcengineModels = data.volcengine_models || [];
+            deepseekModels = data.deepseek_models || [];
+            customModels = data.custom_models || [];
+            
+            // 合并所有模型
+            allModels = [
+                ...availableModels,
+                ...volcengineModels,
+                ...deepseekModels,
+                ...customModels
+            ];
             
             // 更新主模型选择器
             if (elements.modelSelect && availableModels.length > 0) {
-                elements.modelSelect.innerHTML = availableModels.map(m => 
-                    `<option value="${m.id}">${m.name}</option>`
-                ).join('');
+                elements.modelSelect.innerHTML = buildModelOptions(allModels);
             }
             
             // 更新整合模型选择器
             const integrationSelect = document.getElementById('integrationModel');
             if (integrationSelect && availableModels.length > 0) {
-                integrationSelect.innerHTML = availableModels.map(m => 
-                    `<option value="${m.id}">${m.name}</option>`
-                ).join('');
+                integrationSelect.innerHTML = buildModelOptions(allModels);
             }
             
             // 初始化多模型列表（默认3个）
             initMultiModelList();
+            
+            // 初始化 Editor 模型列表
+            initEditorModelList();
         }
     } catch (error) {
         console.log('Could not load models from server, using defaults');
+    }
+}
+
+// 构建模型选项（分组显示）
+function buildModelOptions(models, selectedId = null) {
+    let html = '';
+    
+    // 按 provider 分组
+    const groups = {};
+    models.forEach(m => {
+        const provider = m.provider || 'other';
+        if (!groups[provider]) groups[provider] = [];
+        groups[provider].push(m);
+    });
+    
+    // 提供商显示名称
+    const providerNames = {
+        'openrouter': 'OpenRouter',
+        'volcengine': '火山引擎 (豆包)',
+        'deepseek': 'DeepSeek',
+        'custom': '自定义模型',
+        'other': '其他'
+    };
+    
+    // 按顺序输出分组
+    const order = ['openrouter', 'volcengine', 'deepseek', 'custom', 'other'];
+    for (const provider of order) {
+        if (groups[provider] && groups[provider].length > 0) {
+            html += `<optgroup label="${providerNames[provider] || provider}">`;
+            groups[provider].forEach(m => {
+                const selected = selectedId === m.id ? 'selected' : '';
+                const dataAttrs = m.base_url ? `data-base-url="${m.base_url}"` : '';
+                html += `<option value="${m.id}" ${selected} ${dataAttrs}>${m.name}</option>`;
+            });
+            html += `</optgroup>`;
+        }
+    }
+    
+    return html;
+}
+
+// 添加自定义模型 - 显示模态框
+function addCustomModel() {
+    showCustomModelModal();
+}
+
+// 显示自定义模型配置模态框
+function showCustomModelModal() {
+    // 如果已存在，先移除
+    const existing = document.getElementById('customModelModal');
+    if (existing) existing.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'customModelModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content custom-model-modal">
+            <div class="modal-header">
+                <h3>添加自定义模型</h3>
+                <button class="modal-close" onclick="closeCustomModelModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <path d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>模型名称 <span class="required">*</span></label>
+                    <input type="text" id="customModelName" placeholder="如: doubao-1.5-pro-256k, deepseek-chat">
+                    <p class="hint">API 调用时使用的模型名称</p>
+                </div>
+                <div class="form-group">
+                    <label>显示名称</label>
+                    <input type="text" id="customModelDisplayName" placeholder="如: 豆包 1.5 Pro">
+                    <p class="hint">在下拉菜单中显示的名称（可选）</p>
+                </div>
+                <div class="form-group">
+                    <label>API Base URL <span class="required">*</span></label>
+                    <input type="text" id="customModelBaseUrl" placeholder="如: https://ark.cn-beijing.volces.com/api/v3">
+                    <p class="hint">模型 API 的基础地址</p>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="customModelApiKey" placeholder="留空则使用默认 API Key">
+                    <p class="hint">该模型专用的 API Key（可选）</p>
+                </div>
+                
+                <div class="preset-configs">
+                    <p class="preset-title">快速填充：</p>
+                    <div class="preset-buttons">
+                        <button type="button" class="preset-btn" onclick="fillPreset('volcengine')">
+                            🌋 火山引擎
+                        </button>
+                        <button type="button" class="preset-btn" onclick="fillPreset('deepseek')">
+                            🔍 DeepSeek
+                        </button>
+                        <button type="button" class="preset-btn" onclick="fillPreset('moonshot')">
+                            🌙 Moonshot
+                        </button>
+                        <button type="button" class="preset-btn" onclick="fillPreset('zhipu')">
+                            🧠 智谱AI
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeCustomModelModal()">取消</button>
+                <button type="button" class="btn-primary" onclick="saveCustomModel()">添加模型</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeCustomModelModal();
+    });
+}
+
+// 关闭模态框
+function closeCustomModelModal() {
+    const modal = document.getElementById('customModelModal');
+    if (modal) modal.remove();
+}
+
+// 快速填充预设配置
+function fillPreset(provider) {
+    const presets = {
+        volcengine: {
+            baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+            modelName: 'doubao-1.5-pro-256k',
+            displayName: '豆包 1.5 Pro 256K'
+        },
+        deepseek: {
+            baseUrl: 'https://api.deepseek.com/v1',
+            modelName: 'deepseek-chat',
+            displayName: 'DeepSeek Chat'
+        },
+        moonshot: {
+            baseUrl: 'https://api.moonshot.cn/v1',
+            modelName: 'moonshot-v1-128k',
+            displayName: 'Moonshot 128K'
+        },
+        zhipu: {
+            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+            modelName: 'glm-4-flash',
+            displayName: '智谱 GLM-4 Flash'
+        }
+    };
+    
+    const preset = presets[provider];
+    if (preset) {
+        document.getElementById('customModelName').value = preset.modelName;
+        document.getElementById('customModelDisplayName').value = preset.displayName;
+        document.getElementById('customModelBaseUrl').value = preset.baseUrl;
+    }
+}
+
+// 保存自定义模型
+async function saveCustomModel() {
+    const modelName = document.getElementById('customModelName').value.trim();
+    const displayName = document.getElementById('customModelDisplayName').value.trim();
+    const baseUrl = document.getElementById('customModelBaseUrl').value.trim();
+    const apiKey = document.getElementById('customModelApiKey').value.trim();
+    
+    if (!modelName) {
+        alert('请输入模型名称');
+        return;
+    }
+    if (!baseUrl) {
+        alert('请输入 API Base URL');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/models/custom`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: modelName,
+                id: modelName,
+                name: displayName || modelName,
+                base_url: baseUrl,
+                api_key: apiKey,
+                provider: 'custom'
+            })
+        });
+        
+        if (response.ok) {
+            closeCustomModelModal();
+            await loadModels();  // 重新加载模型列表
+            alert('自定义模型添加成功！');
+        } else {
+            const error = await response.json();
+            alert('添加失败: ' + (error.error || '未知错误'));
+        }
+    } catch (error) {
+        alert('添加失败: ' + error.message);
     }
 }
 
@@ -1387,9 +1683,7 @@ function addMultiModel(defaultValue = null, defaultPrompt = null) {
     item.className = 'multi-model-item';
     item.dataset.index = index;
     
-    const options = availableModels.map((m, i) => 
-        `<option value="${m.id}" ${(!defaultValue && i === 0) || defaultValue === m.id ? 'selected' : ''}>${m.name}</option>`
-    ).join('');
+    const options = buildModelOptions(allModels.length > 0 ? allModels : availableModels, defaultValue);
     
     const promptValue = defaultPrompt || DEFAULT_SYSTEM_PROMPT;
     const promptPreview = promptValue.substring(0, 60) + '...';
@@ -1552,8 +1846,622 @@ function init() {
     console.log('PDF Translator initialized');
 }
 
+// ============================================
+// Editor Mode Functions
+// ============================================
+
+function initEditorMode() {
+    console.log('Initializing Editor Mode...');
+    
+    // Editor PDF 上传
+    const editorPdfInput = document.getElementById('editorPdfInput');
+    const selectEditorPdfBtn = document.getElementById('selectEditorPdfBtn');
+    const pdfUploadArea = document.getElementById('pdfUploadArea');
+    
+    console.log('Editor elements:', {
+        editorPdfInput: !!editorPdfInput,
+        selectEditorPdfBtn: !!selectEditorPdfBtn,
+        pdfUploadArea: !!pdfUploadArea
+    });
+    
+    if (selectEditorPdfBtn) {
+        selectEditorPdfBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Select PDF button clicked');
+            if (editorPdfInput) {
+                editorPdfInput.click();
+            }
+        });
+    }
+    
+    if (pdfUploadArea) {
+        pdfUploadArea.addEventListener('click', (e) => {
+            if (!e.target.closest('button')) {
+                console.log('PDF upload area clicked');
+                if (editorPdfInput) {
+                    editorPdfInput.click();
+                }
+            }
+        });
+    }
+    
+    if (editorPdfInput) {
+        editorPdfInput.addEventListener('change', (e) => {
+            console.log('PDF input changed');
+            const file = e.target.files[0];
+            if (file) handleEditorPdfUpload(file);
+        });
+    }
+    
+    // Editor Word 上传
+    const editorWordInput = document.getElementById('editorWordInput');
+    const selectEditorWordBtn = document.getElementById('selectEditorWordBtn');
+    const wordUploadArea = document.getElementById('wordUploadArea');
+    
+    console.log('Word elements:', {
+        editorWordInput: !!editorWordInput,
+        selectEditorWordBtn: !!selectEditorWordBtn,
+        wordUploadArea: !!wordUploadArea
+    });
+    
+    if (selectEditorWordBtn) {
+        selectEditorWordBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Select Word button clicked');
+            if (editorWordInput) {
+                editorWordInput.click();
+            }
+        });
+    }
+    
+    if (wordUploadArea) {
+        wordUploadArea.addEventListener('click', (e) => {
+            if (!e.target.closest('button')) {
+                console.log('Word upload area clicked');
+                if (editorWordInput) {
+                    editorWordInput.click();
+                }
+            }
+        });
+    }
+    
+    if (editorWordInput) {
+        editorWordInput.addEventListener('change', (e) => {
+            console.log('Word input changed');
+            const file = e.target.files[0];
+            if (file) handleEditorWordUpload(file);
+        });
+    }
+    
+    // 移除文件按钮
+    const removeEditorFiles = document.getElementById('removeEditorFiles');
+    if (removeEditorFiles) {
+        removeEditorFiles.addEventListener('click', resetEditorMode);
+    }
+    
+    // 开始编辑按钮
+    const startEditorBtn = document.getElementById('startEditorBtn');
+    if (startEditorBtn) {
+        startEditorBtn.addEventListener('click', startEditorTask);
+    }
+    
+    // 添加模型按钮
+    const addEditorModelBtn = document.getElementById('addEditorModelBtn');
+    if (addEditorModelBtn) {
+        addEditorModelBtn.addEventListener('click', addEditorModel);
+    }
+    
+    // 页面范围
+    const editorStartPage = document.getElementById('editorStartPage');
+    const editorEndPage = document.getElementById('editorEndPage');
+    if (editorStartPage) {
+        editorStartPage.addEventListener('input', updateEditorRangeInfo);
+    }
+    if (editorEndPage) {
+        editorEndPage.addEventListener('input', updateEditorRangeInfo);
+    }
+    
+    // 提示词编辑
+    const editorPromptToggle = document.getElementById('editorPromptToggle');
+    if (editorPromptToggle) {
+        editorPromptToggle.addEventListener('click', () => {
+            const editor = document.getElementById('editorPromptEditor');
+            const preview = document.getElementById('editorPromptPreview');
+            if (editor && preview) {
+                const isHidden = editor.style.display === 'none';
+                editor.style.display = isHidden ? 'block' : 'none';
+                preview.style.display = isHidden ? 'none' : 'block';
+            }
+        });
+    }
+    
+    const resetEditorPrompt = document.getElementById('resetEditorPrompt');
+    if (resetEditorPrompt) {
+        resetEditorPrompt.addEventListener('click', () => {
+            const textarea = document.getElementById('editorPrompt');
+            if (textarea) {
+                textarea.value = DEFAULT_EDITOR_PROMPT;
+            }
+        });
+    }
+    
+    const saveEditorPrompt = document.getElementById('saveEditorPrompt');
+    if (saveEditorPrompt) {
+        saveEditorPrompt.addEventListener('click', () => {
+            const editor = document.getElementById('editorPromptEditor');
+            const preview = document.getElementById('editorPromptPreview');
+            const textarea = document.getElementById('editorPrompt');
+            if (editor && preview && textarea) {
+                editor.style.display = 'none';
+                preview.style.display = 'block';
+                const previewText = preview.querySelector('.preview-text');
+                if (previewText) {
+                    previewText.textContent = textarea.value.substring(0, 50) + '...';
+                }
+            }
+        });
+    }
+    
+    // 初始化编辑模型列表
+    initEditorModelList();
+    
+    // 加载默认提示词
+    const editorPromptTextarea = document.getElementById('editorPrompt');
+    if (editorPromptTextarea) {
+        editorPromptTextarea.value = DEFAULT_EDITOR_PROMPT;
+    }
+}
+
+async function handleEditorPdfUpload(file) {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+        alert('请选择 PDF 文件');
+        return;
+    }
+    
+    const statusEl = document.getElementById('pdfUploadStatus');
+    if (statusEl) statusEl.innerHTML = '<span class="uploading">上传中...</span>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE}/api/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '上传失败');
+        }
+        
+        const data = await response.json();
+        
+        state.editor.pdfFile = file;
+        state.editor.pdfFileId = data.file_id;
+        state.editor.pdfPath = data.path;
+        state.editor.pdfTotalPages = data.total_pages;
+        state.editor.endPage = Math.min(10, data.total_pages);
+        
+        if (statusEl) statusEl.innerHTML = `<span class="success">✓ ${file.name} (${data.total_pages}页)</span>`;
+        
+        // 更新页面范围
+        const startPageEl = document.getElementById('editorStartPage');
+        const endPageEl = document.getElementById('editorEndPage');
+        if (startPageEl) startPageEl.max = data.total_pages;
+        if (endPageEl) {
+            endPageEl.max = data.total_pages;
+            endPageEl.value = Math.min(10, data.total_pages);
+        }
+        
+        checkEditorReady();
+    } catch (error) {
+        console.error('PDF upload error:', error);
+        if (statusEl) statusEl.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+    }
+}
+
+async function handleEditorWordUpload(file) {
+    if (!file.name.toLowerCase().endsWith('.docx') && !file.name.toLowerCase().endsWith('.doc')) {
+        alert('请选择 Word 文件 (.docx)');
+        return;
+    }
+    
+    const statusEl = document.getElementById('wordUploadStatus');
+    if (statusEl) statusEl.innerHTML = '<span class="uploading">上传中...</span>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE}/api/editor/upload-word`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '上传失败');
+        }
+        
+        const data = await response.json();
+        
+        state.editor.wordFile = file;
+        state.editor.wordFileId = data.file_id;
+        state.editor.wordPath = data.path;
+        state.editor.wordParagraphCount = data.paragraph_count;
+        
+        if (statusEl) statusEl.innerHTML = `<span class="success">✓ ${file.name} (${data.paragraph_count}段)</span>`;
+        
+        checkEditorReady();
+    } catch (error) {
+        console.error('Word upload error:', error);
+        if (statusEl) statusEl.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+    }
+}
+
+function checkEditorReady() {
+    state.editor.isReady = state.editor.pdfPath && state.editor.wordPath;
+    
+    if (state.editor.isReady) {
+        // 切换到配置面板
+        const editorUploadSection = document.getElementById('editorUploadSection');
+        const editorConfigPanel = document.getElementById('editorConfigPanel');
+        
+        if (editorUploadSection) editorUploadSection.style.display = 'none';
+        if (editorConfigPanel) editorConfigPanel.style.display = 'block';
+        
+        // 更新文件信息显示
+        const pdfNameEl = document.getElementById('editorPdfName');
+        const pdfMetaEl = document.getElementById('editorPdfMeta');
+        const wordNameEl = document.getElementById('editorWordName');
+        const wordMetaEl = document.getElementById('editorWordMeta');
+        
+        if (pdfNameEl) pdfNameEl.textContent = state.editor.pdfFile?.name || 'PDF';
+        if (pdfMetaEl) pdfMetaEl.textContent = `${state.editor.pdfTotalPages} 页`;
+        if (wordNameEl) wordNameEl.textContent = state.editor.wordFile?.name || 'Word';
+        if (wordMetaEl) wordMetaEl.textContent = `${state.editor.wordParagraphCount} 段落`;
+        
+        updateEditorRangeInfo();
+    }
+}
+
+function resetEditorMode() {
+    state.editor = {
+        pdfFile: null,
+        pdfFileId: null,
+        pdfPath: null,
+        pdfTotalPages: 0,
+        wordFile: null,
+        wordFileId: null,
+        wordPath: null,
+        wordParagraphCount: 0,
+        startPage: 1,
+        endPage: 10,
+        translationModels: ['x-ai/grok-4.1-fast', 'anthropic/claude-sonnet-4'],
+        editorModel: 'anthropic/claude-sonnet-4',
+        taskId: null,
+        results: null,
+        isReady: false
+    };
+    
+    // 重置上传状态
+    const pdfStatus = document.getElementById('pdfUploadStatus');
+    const wordStatus = document.getElementById('wordUploadStatus');
+    if (pdfStatus) pdfStatus.innerHTML = '';
+    if (wordStatus) wordStatus.innerHTML = '';
+    
+    // 重置输入
+    const editorPdfInput = document.getElementById('editorPdfInput');
+    const editorWordInput = document.getElementById('editorWordInput');
+    if (editorPdfInput) editorPdfInput.value = '';
+    if (editorWordInput) editorWordInput.value = '';
+    
+    // 切换回上传面板
+    const editorUploadSection = document.getElementById('editorUploadSection');
+    const editorConfigPanel = document.getElementById('editorConfigPanel');
+    if (editorUploadSection) editorUploadSection.style.display = 'block';
+    if (editorConfigPanel) editorConfigPanel.style.display = 'none';
+}
+
+function updateEditorRangeInfo() {
+    const startEl = document.getElementById('editorStartPage');
+    const endEl = document.getElementById('editorEndPage');
+    const infoEl = document.getElementById('editorRangeInfo');
+    
+    const start = parseInt(startEl?.value) || 1;
+    const end = parseInt(endEl?.value) || 10;
+    const count = Math.max(0, end - start + 1);
+    
+    if (infoEl) infoEl.textContent = `共 ${count} 页`;
+    
+    state.editor.startPage = start;
+    state.editor.endPage = end;
+}
+
+// Editor 模型管理
+let editorModelCount = 0;
+
+function initEditorModelList() {
+    const container = document.getElementById('editorModelList');
+    if (!container) return;
+    
+    // 如果模型列表为空，等待加载
+    const models = allModels.length > 0 ? allModels : availableModels;
+    if (models.length === 0) {
+        console.log('Models not loaded yet, will retry...');
+        return;
+    }
+    
+    container.innerHTML = '';
+    editorModelCount = 0;
+    
+    // 默认添加2个模型，都使用 grok-4.1-fast
+    addEditorModel('x-ai/grok-4.1-fast');
+    addEditorModel('x-ai/grok-4.1-fast');
+    
+    // 初始化编辑模型选择器，默认也是 grok-4.1-fast
+    const editorModelSelect = document.getElementById('editorModelSelect');
+    if (editorModelSelect && models.length > 0) {
+        editorModelSelect.innerHTML = buildModelOptions(models, 'x-ai/grok-4.1-fast');
+    }
+    
+    // 初始化对齐模型选择器
+    const alignmentModelSelect = document.getElementById('alignmentModelSelect');
+    if (alignmentModelSelect && models.length > 0) {
+        alignmentModelSelect.innerHTML = buildModelOptions(models, 'x-ai/grok-4.1-fast');
+    }
+    
+    console.log('Editor model list initialized with', models.length, 'models');
+}
+
+function addEditorModel(defaultValue = null) {
+    const container = document.getElementById('editorModelList');
+    if (!container) return;
+    
+    editorModelCount++;
+    const index = editorModelCount;
+    
+    const item = document.createElement('div');
+    item.className = 'editor-model-item';
+    item.dataset.index = index;
+    
+    const models = allModels.length > 0 ? allModels : availableModels;
+    const options = buildModelOptions(models, defaultValue);
+    
+    item.innerHTML = `
+        <span class="model-number">${index}</span>
+        <select class="model-select" data-editor-model-index="${index}">
+            ${options}
+        </select>
+        <button type="button" class="remove-model-btn" onclick="removeEditorModel(${index})" title="移除">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+        </button>
+    `;
+    
+    container.appendChild(item);
+}
+
+function removeEditorModel(index) {
+    const container = document.getElementById('editorModelList');
+    if (!container) return;
+    
+    const items = container.querySelectorAll('.editor-model-item');
+    if (items.length <= 1) {
+        alert('至少需要1个翻译模型');
+        return;
+    }
+    
+    const item = container.querySelector(`.editor-model-item[data-index="${index}"]`);
+    if (item) {
+        item.remove();
+        // 更新编号
+        container.querySelectorAll('.editor-model-item').forEach((el, i) => {
+            const num = el.querySelector('.model-number');
+            if (num) num.textContent = i + 1;
+        });
+    }
+}
+
+function getEditorTranslationModels() {
+    const container = document.getElementById('editorModelList');
+    if (!container) return [];
+    
+    const selects = container.querySelectorAll('.model-select');
+    return Array.from(selects).map(s => {
+        const modelId = s.value;
+        // 查找完整的模型配置
+        const models = allModels.length > 0 ? allModels : availableModels;
+        const modelConfig = models.find(m => m.id === modelId);
+        
+        if (modelConfig && (modelConfig.base_url || modelConfig.api_key)) {
+            // 返回完整配置
+            return {
+                model: modelId,
+                name: modelConfig.name || modelId,
+                base_url: modelConfig.base_url || '',
+                api_key: modelConfig.api_key || ''
+            };
+        }
+        // 普通模型只返回ID
+        return modelId;
+    });
+}
+
+// 获取单个模型的完整配置
+function getModelConfig(modelId) {
+    const models = allModels.length > 0 ? allModels : availableModels;
+    const modelConfig = models.find(m => m.id === modelId);
+    
+    if (modelConfig && (modelConfig.base_url || modelConfig.api_key)) {
+        return {
+            model: modelId,
+            name: modelConfig.name || modelId,
+            base_url: modelConfig.base_url || '',
+            api_key: modelConfig.api_key || ''
+        };
+    }
+    return modelId;
+}
+
+async function startEditorTask() {
+    if (!state.editor.pdfPath || !state.editor.wordPath) {
+        alert('请先上传 PDF 原文和 Word 译文');
+        return;
+    }
+    
+    const startBtn = document.getElementById('startEditorBtn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<span class="btn-text">处理中...</span>';
+    }
+    
+    try {
+        const translationModels = getEditorTranslationModels();
+        const editorModelSelect = document.getElementById('editorModelSelect');
+        const alignmentModelSelect = document.getElementById('alignmentModelSelect');
+        const editorPromptTextarea = document.getElementById('editorPrompt');
+        const workersEl = document.getElementById('editorWorkers');
+        
+        // 获取编辑模型和对齐模型的完整配置
+        const editorModelId = editorModelSelect?.value || 'x-ai/grok-4.1-fast';
+        const alignmentModelId = alignmentModelSelect?.value || 'x-ai/grok-4.1-fast';
+        
+        const requestData = {
+            pdf_path: state.editor.pdfPath,
+            word_path: state.editor.wordPath,
+            start_page: state.editor.startPage,
+            end_page: state.editor.endPage,
+            translation_models: translationModels,
+            editor_model: getModelConfig(editorModelId),
+            alignment_model: getModelConfig(alignmentModelId),
+            editor_prompt: editorPromptTextarea?.value || DEFAULT_EDITOR_PROMPT,
+            workers: parseInt(workersEl?.value) || 5
+        };
+        
+        const response = await fetch(`${API_BASE}/api/editor/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestData)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '启动任务失败');
+        }
+        
+        const data = await response.json();
+        state.editor.taskId = data.task_id;
+        
+        // 显示进度面板
+        const editorConfigPanel = document.getElementById('editorConfigPanel');
+        const progressPanel = document.getElementById('progressPanel');
+        if (editorConfigPanel) editorConfigPanel.style.display = 'none';
+        if (progressPanel) progressPanel.style.display = 'flex';
+        
+        // 开始轮询任务状态
+        pollEditorTaskStatus();
+        
+    } catch (error) {
+        console.error('Start editor task error:', error);
+        alert('启动编辑任务失败: ' + error.message);
+    } finally {
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = `
+                <span class="btn-text">开始编辑打磨</span>
+                <span class="btn-icon">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                        <path d="M21.731 2.269a2.625 2.625 0 00-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 000-3.712zM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 00-1.32 2.214l-.8 2.685a.75.75 0 00.933.933l2.685-.8a5.25 5.25 0 002.214-1.32L19.513 8.2z"/>
+                    </svg>
+                </span>
+            `;
+        }
+    }
+}
+
+async function pollEditorTaskStatus() {
+    if (!state.editor.taskId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/editor/task/${state.editor.taskId}`);
+        if (!response.ok) return;
+        
+        const task = await response.json();
+        
+        // 更新进度显示
+        updateProgress(task.progress);
+        
+        if (elements.completedCount) {
+            elements.completedCount.textContent = task.completed_paragraphs || 0;
+        }
+        if (elements.totalCount) {
+            elements.totalCount.textContent = task.total_paragraphs || 0;
+        }
+        if (elements.currentTask) {
+            elements.currentTask.textContent = `编辑打磨中... ${task.completed_paragraphs || 0}/${task.total_paragraphs || 0} 段落`;
+        }
+        
+        if (task.status === 'completed') {
+            // 获取结果
+            const resultsResponse = await fetch(`${API_BASE}/api/editor/task/${state.editor.taskId}/results`);
+            if (resultsResponse.ok) {
+                const results = await resultsResponse.json();
+                state.editor.results = results;
+                showEditorResults(results);
+            }
+        } else if (task.status === 'error') {
+            alert('编辑任务出错: ' + (task.error || '未知错误'));
+            const progressPanel = document.getElementById('progressPanel');
+            const editorConfigPanel = document.getElementById('editorConfigPanel');
+            if (progressPanel) progressPanel.style.display = 'none';
+            if (editorConfigPanel) editorConfigPanel.style.display = 'block';
+        } else {
+            // 继续轮询
+            setTimeout(pollEditorTaskStatus, 2000);
+        }
+    } catch (error) {
+        console.error('Poll editor task error:', error);
+        setTimeout(pollEditorTaskStatus, 3000);
+    }
+}
+
+function showEditorResults(results) {
+    // 隐藏进度面板
+    const progressPanel = document.getElementById('progressPanel');
+    if (progressPanel) progressPanel.style.display = 'none';
+    
+    // 显示结果面板
+    const resultPanel = document.getElementById('resultPanel');
+    if (resultPanel) resultPanel.style.display = 'flex';
+    
+    // 更新结果摘要
+    const stats = results.stats || {};
+    if (elements.resultSummary) {
+        elements.resultSummary.textContent = `已处理 ${stats.total || 0} 个段落，编辑 ${stats.edited || 0} 个，AI翻译 ${stats.translated_only || 0} 个`;
+    }
+    
+    // 存储结果用于对比阅读
+    state.translatedContent = {};
+    for (const para of (results.paragraphs || [])) {
+        const page = para.page;
+        if (!state.translatedContent[page]) {
+            state.translatedContent[page] = { original: [], translated: [] };
+        }
+        state.translatedContent[page].original.push(para.source_text || '');
+        state.translatedContent[page].translated.push(para.final || '');
+    }
+}
+
 // Start
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', function() {
+    init();
+    initEditorMode();
+});
 
 // 暴露给全局，供 onclick 使用
 window.viewHistoryItem = viewHistoryItem;
@@ -1566,3 +2474,4 @@ window.downloadHistoryPdf = downloadHistoryPdf;
 window.toggleModelPrompt = toggleModelPrompt;
 window.resetModelPrompt = resetModelPrompt;
 window.saveModelPrompt = saveModelPrompt;
+window.removeEditorModel = removeEditorModel;
